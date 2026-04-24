@@ -116,11 +116,13 @@ HTML;
 		$model = $config->get( 'AssistedSearchModel' );
 		$maxRounds = $config->get( 'AssistedSearchMaxToolRounds' );
 		$serverUrl = $config->get( 'Server' );
+		$gistFile = $config->get( 'AssistedSearchGistFile' );
+		$feedbackFile = $config->get( 'AssistedSearchFeedbackFile' );
 
 		$sectionExtractor = new SectionExtractor( $serverUrl );
 		$toolExecutor = new SearchToolExecutor( $sectionExtractor );
 		$logger = LoggerFactory::getInstance( 'AssistedSearch' );
 
-		return new AssistedSearchService( $apiKey, $model, $maxRounds, $toolExecutor, $sectionExtractor, $logger );
+		return new AssistedSearchService( $apiKey, $model, $maxRounds, $toolExecutor, $sectionExtractor, $logger, $gistFile, $feedbackFile );
 	}
 }

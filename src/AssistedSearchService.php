@@ -13,6 +13,8 @@ class AssistedSearchService {
 	private SearchToolExecutor $toolExecutor;
 	private SectionExtractor $sectionExtractor;
 	private LoggerInterface $logger;
+	private ?string $gistFile;
+	private ?string $feedbackFile;
 
 	private const SYSTEM_PROMPT = <<<'PROMPT'
 You are a wiki search assistant. Your job is to find the most relevant article sections for a user's query.
@@ -90,7 +92,9 @@ PROMPT;
 		int $maxRounds,
 		SearchToolExecutor $toolExecutor,
 		SectionExtractor $sectionExtractor,
-		LoggerInterface $logger
+		LoggerInterface $logger,
+		?string $gistFile = null,
+		?string $feedbackFile = null
 	) {
 		$this->apiKey = $apiKey;
 		$this->model = $model;
@@ -98,6 +102,8 @@ PROMPT;
 		$this->toolExecutor = $toolExecutor;
 		$this->sectionExtractor = $sectionExtractor;
 		$this->logger = $logger;
+		$this->gistFile = $gistFile;
+		$this->feedbackFile = $feedbackFile;
 	}
 
 	/**
@@ -113,6 +119,11 @@ PROMPT;
 		$client = new OpenRouterClient( $this->apiKey );
 
 		$systemPrompt = self::SYSTEM_PROMPT . "\n\nIMPORTANT: You MUST respond in the language with code \"$langCode\". All text in your final answer (relevance_explanation, section_heading, article_title) must be in that language.";
+
+		$gistContent = $this->loadGist();
+		if ( $gistContent !== '' ) {
+			$systemPrompt .= "\n\nThe following is a summary of this wiki's contents (categories and articles). Use it to generate better search terms and understand the wiki structure:\n\n```\n{$gistContent}\n```";
+		}
 
 		$messages = [
 			[ 'role' => 'system', 'content' => $systemPrompt ],
@@ -147,6 +158,7 @@ PROMPT;
 				] );
 				$parsed = $this->parseFinalResponse( $result['content'] ?? '' );
 				$this->logger->info( "AssistedSearch: Parsed {count} results", [ 'count' => count( $parsed ) ] );
+				$this->writeFeedback( $userQuery, $parsed );
 				return $parsed;
 			}
 
@@ -187,7 +199,55 @@ PROMPT;
 		$result = $client->chatEx( $messages, $this->model, [] );
 		$parsed = $this->parseFinalResponse( $result['content'] ?? '' );
 		$this->logger->info( "AssistedSearch: Final answer parsed {count} results", [ 'count' => count( $parsed ) ] );
+		$this->writeFeedback( $userQuery, $parsed );
 		return $parsed;
+	}
+
+	private function loadGist(): string {
+		if ( !$this->gistFile || !file_exists( $this->gistFile ) ) {
+			return '';
+		}
+		$content = file_get_contents( $this->gistFile );
+		if ( $content === false ) {
+			$this->logger->warning( "AssistedSearch: Failed to read gist file: {file}", [
+				'file' => $this->gistFile,
+			] );
+			return '';
+		}
+		$this->logger->info( "AssistedSearch: Loaded gist ({bytes} bytes) from {file}", [
+			'bytes' => strlen( $content ),
+			'file' => $this->gistFile,
+		] );
+		return $content;
+	}
+
+	private function writeFeedback( string $query, array $results ): void {
+		if ( !$this->feedbackFile ) {
+			return;
+		}
+		$dir = dirname( $this->feedbackFile );
+		if ( !is_dir( $dir ) ) {
+			mkdir( $dir, 0755, true );
+		}
+
+		$ts = wfTimestampNow();
+		$handle = fopen( $this->feedbackFile, 'a' );
+		if ( !$handle ) {
+			$this->logger->warning( "AssistedSearch: Failed to open feedback file: {file}", [
+				'file' => $this->feedbackFile,
+			] );
+			return;
+		}
+
+		foreach ( $results as $result ) {
+			fwrite( $handle, json_encode( [
+				'query' => $query,
+				'article_title' => $result['article_title'],
+				'section_heading' => $result['section_heading'],
+				'ts' => $ts,
+			] ) . "\n" );
+		}
+		fclose( $handle );
 	}
 
 	private function executeTool( string $name, array $args ): array {

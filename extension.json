@@ -35,6 +35,18 @@
 		"AssistedSearchMaxConcurrent": {
 			"description": "Maximum number of concurrent assisted searches",
 			"value": 2
+		},
+		"AssistedSearchGistFile": {
+			"description": "Path to wiki gist file included in LLM prompts. Set to false to disable.",
+			"value": false
+		},
+		"AssistedSearchFeedbackFile": {
+			"description": "Path to JSONL file for logging search feedback (article result frequency).",
+			"value": false
+		},
+		"AssistedSearchMinArticleLength": {
+			"description": "Minimum page length in bytes to include in gist file.",
+			"value": 500
 		}
 	},
 	"manifest_version": 2
