@@ -1,0 +1,8 @@
+{
+	"name": "mediawiki/assisted-search",
+	"description": "LLM-assisted wiki search using OpenRouter",
+	"type": "mediawiki-extension",
+	"require": {
+		"cheinisch/openrouter-php-client": "^0.3"
+	}
+}

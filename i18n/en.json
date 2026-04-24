@@ -1,0 +1,14 @@
+{
+	"assistedsearch": "Assisted Search",
+	"assistedsearch-desc": "LLM-assisted wiki search using OpenRouter",
+	"assistedsearch-search-button": "Search",
+	"assistedsearch-placeholder": "Enter your search query...",
+	"assistedsearch-no-results": "No relevant sections found.",
+	"assistedsearch-error-no-api-key": "AssistedSearch is not configured. Set $wgAssistedSearchApiKey in LocalSettings.php.",
+	"assistedsearch-error-llm": "An error occurred while contacting the LLM: $1",
+	"assistedsearch-results-heading": "Search results for \"$1\"",
+	"assistedsearch-relevance": "Relevance: $1",
+	"assistedsearch-privacy-notice": "Queries will be logged and sent to external LLM providers.",
+	"assistedsearch-time-notice": "Executing the query can take up to three minutes.",
+	"assistedsearch-error-concurrency": "Too many searches are running concurrently. Please try again in a moment."
+}

@@ -1,0 +1,41 @@
+{
+	"name": "AssistedSearch",
+	"author": "MyWiki",
+	"version": "1.0.0",
+	"url": "https://example.com",
+	"description": "LLM-assisted wiki search using OpenRouter",
+	"descriptionmsg": "assistedsearch-desc",
+	"license-name": "GPL-2.0-or-later",
+	"type": "specialpage",
+	"requires": {
+		"MediaWiki": ">= 1.42.0"
+	},
+	"AutoloadNamespaces": {
+		"MediaWiki\\Extension\\AssistedSearch\\": "src/"
+	},
+	"SpecialPages": {
+		"AssistedSearch": "MediaWiki\\Extension\\AssistedSearch\\SpecialAssistedSearch"
+	},
+	"MessagesDirs": {
+		"AssistedSearch": "i18n"
+	},
+	"config": {
+		"AssistedSearchApiKey": {
+			"description": "OpenRouter API key for LLM-assisted search",
+			"value": ""
+		},
+		"AssistedSearchModel": {
+			"description": "OpenRouter model to use for search",
+			"value": "openai/gpt-4o-mini"
+		},
+		"AssistedSearchMaxToolRounds": {
+			"description": "Maximum number of tool-calling rounds",
+			"value": 3
+		},
+		"AssistedSearchMaxConcurrent": {
+			"description": "Maximum number of concurrent assisted searches",
+			"value": 2
+		}
+	},
+	"manifest_version": 2
+}
