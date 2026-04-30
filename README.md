@@ -30,7 +30,7 @@ A gist file gives the LLM context about the wiki's categories and articles so it
 Generate it with the maintenance script (run via cron):
 
 ```
-php maintenance/run.php generateAssistedSearchGist \
+php maintenance/run.php AssistedSearch:generateAssistedSearchGist \
   --output=$IP/cache/assistedsearch-gist.txt \
   --feedback-file=$IP/cache/assistedsearch-feedback.jsonl
 ```
@@ -41,6 +41,17 @@ The gist includes:
 - **Frequently accessed**: articles that appear most often in search results (from feedback log), with longer summaries
 
 The maintenance script also prunes feedback entries older than 30 days.
+
+## Logging
+
+Search queries and the complete LLM conversation (messages, tool calls, tool results) are logged to the `AssistedSearch` channel. Enable debug-level logging to capture full conversation details:
+
+```
+$wgDebugLogGroups['AssistedSearch'] = [
+    'destination' => '/path/to/assistedsearch.log',
+    'level' => 'debug',
+];
+```
 
 ## Installation
 

@@ -74,14 +74,13 @@ class SpecialAssistedSearch extends SpecialPage {
 	}
 
 	private function getSearchForm(): string {
-		$query = htmlspecialchars( $this->getRequest()->getText( 'query' ) );
 		$buttonText = $this->msg( 'assistedsearch-search-button' )->text();
 		$placeholder = $this->msg( 'assistedsearch-placeholder' )->text();
 		$actionUrl = htmlspecialchars( $this->getPageTitle()->getLocalURL() );
 
 		return <<<HTML
-<form method="get" action="{$actionUrl}">
-	<input type="text" name="query" value="{$query}" placeholder="{$placeholder}" size="60" autofocus />
+<form method="post" action="{$actionUrl}">
+	<input type="text" name="query" placeholder="{$placeholder}" size="60" autofocus autocomplete="off" />
 	<input type="submit" value="{$buttonText}" />
 </form>
 HTML;
@@ -101,9 +100,8 @@ HTML;
 
 			$html .= <<<HTML
 <li class="assistedsearch-result">
-	<strong>{$rank}. {$sectionHeading}</strong> ({$articleTitle})<br />
-	{$relevance}<br />
-	<a href="{$sectionUrl}">{$sectionUrl}</a>
+	<a href="{$sectionUrl}"><b>{$articleTitle}</b> / {$sectionHeading}</a><br />
+	{$relevance}
 </li>
 HTML;
 		}
@@ -115,11 +113,10 @@ HTML;
 		$config = $this->getConfig();
 		$model = $config->get( 'AssistedSearchModel' );
 		$maxRounds = $config->get( 'AssistedSearchMaxToolRounds' );
-		$serverUrl = $config->get( 'Server' );
 		$gistFile = $config->get( 'AssistedSearchGistFile' );
 		$feedbackFile = $config->get( 'AssistedSearchFeedbackFile' );
 
-		$sectionExtractor = new SectionExtractor( $serverUrl );
+		$sectionExtractor = new SectionExtractor();
 		$toolExecutor = new SearchToolExecutor( $sectionExtractor );
 		$logger = LoggerFactory::getInstance( 'AssistedSearch' );
 

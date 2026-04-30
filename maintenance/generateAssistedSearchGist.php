@@ -29,13 +29,13 @@ class GenerateAssistedSearchGist extends Maintenance {
 	public function execute() {
 		$config = $this->getConfig();
 
-		$outputPath = $this->getOption( 'output', $config->get( 'AssistedSearchGistFile' ) );
+		$outputPath = $this->getOption( 'output', $config->has( 'AssistedSearchGistFile' ) ? $config->get( 'AssistedSearchGistFile' ) : false );
 		if ( !$outputPath ) {
 			$this->fatalError( 'No output path specified. Use --output or set $wgAssistedSearchGistFile.' );
 		}
 
-		$minLength = (int)$this->getOption( 'min-article-length', $config->get( 'AssistedSearchMinArticleLength' ) );
-		$feedbackFile = $this->getOption( 'feedback-file', $config->get( 'AssistedSearchFeedbackFile' ) );
+		$minLength = (int)$this->getOption( 'min-article-length', $config->has( 'AssistedSearchMinArticleLength' ) ? $config->get( 'AssistedSearchMinArticleLength' ) : 500 );
+		$feedbackFile = $this->getOption( 'feedback-file', $config->has( 'AssistedSearchFeedbackFile' ) ? $config->get( 'AssistedSearchFeedbackFile' ) : false );
 		$maxArticles = $this->getOption( 'max-article-length', null );
 		$maxFrequent = (int)$this->getOption( 'max-frequent', 20 );
 		$summaryLength = (int)$this->getOption( 'summary-length', 200 );
@@ -47,7 +47,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 		$this->output( "Generating AssistedSearch gist...\n" );
 
 		$stats = $this->getStats( $dbr );
-		$categories = $this->buildCategoryTree( $dbr );
+		$categories = $this->buildCategoryList( $dbr );
 		$frequentTitles = $this->loadFeedback( $feedbackFile );
 		$articles = $this->getArticles( $dbr, $wikiPageFactory, $minLength, $maxArticles, $summaryLength, $frequentTitles );
 
@@ -57,7 +57,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 		if ( !is_dir( $dir ) ) {
 			mkdir( $dir, 0755, true );
 		}
-		file_put_contents( $outputPath, $gist );
+		file_put_contents( $outputPath, iconv( 'UTF-8', 'UTF-8//IGNORE', $gist ) );
 
 		$this->output( "Gist written to $outputPath (" . strlen( $gist ) . " bytes)\n" );
 
@@ -65,74 +65,30 @@ class GenerateAssistedSearchGist extends Maintenance {
 	}
 
 	private function getStats( $dbr ): array {
-		$row = $dbr->newSelectQueryBuilder()
-			->select( [
-				'articles' => $dbr->expr( 'COUNT(*)', '>=', 0 )->andExpr(
-					$dbr->expr( 'page_namespace', '=', NS_MAIN )
-				),
-				'categories' => $dbr->expr( 'COUNT(*)', '>=', 0 )->andExpr(
-					$dbr->expr( 'page_namespace', '=', NS_CATEGORY )
-				),
-			] )
-			->from( 'page' )
-			->caller( __METHOD__ )->fetchRow();
-
 		return [
 			'articles' => (int)$dbr->selectField( 'page', 'COUNT(*)', [ 'page_namespace' => NS_MAIN ], __METHOD__ ),
 			'categories' => (int)$dbr->selectField( 'page', 'COUNT(*)', [ 'page_namespace' => NS_CATEGORY ], __METHOD__ ),
 		];
 	}
 
-	private function buildCategoryTree( $dbr ): array {
-		$childCats = $dbr->newSelectQueryBuilder()
-			->select( 'lt_title' )
-			->from( 'categorylinks' )
-			->join( 'linktarget', null, 'cl_target_id = lt_id' )
-			->where( [ 'cl_type' => 'subcat', 'lt_namespace' => NS_CATEGORY ] )
+	private function buildCategoryList( $dbr ): array {
+		$titles = $dbr->newSelectQueryBuilder()
+			->select( 'page_title' )
+			->from( 'page' )
+			->where( [ 'page_namespace' => NS_CATEGORY ] )
+			->orderBy( 'page_title' )
 			->caller( __METHOD__ )->fetchFieldValues();
 
-		$childCatSet = array_flip( $childCats );
-
-		$res = $dbr->newSelectQueryBuilder()
-			->select( 'cat_title' )
-			->from( 'category' )
-			->caller( __METHOD__ )->fetchResultSet();
-
-		$topLevel = [];
-		foreach ( $res as $row ) {
-			if ( !isset( $childCatSet[$row->cat_title] ) ) {
-				$topLevel[] = $row->cat_title;
+		$result = [];
+		foreach ( $titles as $title ) {
+			$display = str_replace( '_', ' ', $title );
+			// Omit year-only categories (e.g., "1983", "2004") — they add noise without search value
+			if ( preg_match( '/^\d+$/', $display ) ) {
+				continue;
 			}
+			$result[] = $display;
 		}
-
-		sort( $topLevel );
-		$tree = [];
-		foreach ( $topLevel as $cat ) {
-			$tree[$cat] = $this->getSubcategories( $dbr, $cat );
-		}
-
-		return $tree;
-	}
-
-	private function getSubcategories( $dbr, string $parentCat ): array {
-		$subcats = $dbr->newSelectQueryBuilder()
-			->select( 'lt_title' )
-			->from( 'categorylinks' )
-			->join( 'linktarget', null, 'cl_target_id = lt_id' )
-			->where( [
-				'cl_type' => 'subcat',
-				'lt_namespace' => NS_CATEGORY,
-				'cl_from' => $dbr->newSelectQueryBuilder()
-					->select( 'page_id' )
-					->from( 'page' )
-					->where( [ 'page_namespace' => NS_CATEGORY, 'page_title' => $parentCat ] )
-					->caller( __METHOD__ )->buildSelectSQLValues(),
-			] )
-			->caller( __METHOD__ )->fetchFieldValues();
-
-		$subcats = array_unique( $subcats );
-		sort( $subcats );
-		return $subcats;
+		return $result;
 	}
 
 	private function loadFeedback( ?string $feedbackFile ): array {
@@ -201,6 +157,8 @@ class GenerateAssistedSearchGist extends Maintenance {
 	}
 
 	private function getArticles( $dbr, $wikiPageFactory, int $minLength, ?int $maxArticles, int $summaryLength, array $frequentTitles ): array {
+		$hasLinkTarget = $dbr->fieldExists( 'categorylinks', 'cl_target_id' );
+
 		$query = $dbr->newSelectQueryBuilder()
 			->select( [ 'page_id', 'page_title', 'page_len' ] )
 			->from( 'page' )
@@ -231,23 +189,30 @@ class GenerateAssistedSearchGist extends Maintenance {
 			$content = $wikiPage->getContent();
 			$summary = '';
 			if ( $content ) {
-				$summary = $content->getTextForSummary( $summaryLength );
+				$summary = WikitextCleaner::cleanText( $content->getTextForSearchIndex(), $summaryLength );
 			}
 
-			$pageCats = $dbr->newSelectQueryBuilder()
-				->select( 'lt_title' )
-				->from( 'categorylinks' )
-				->join( 'linktarget', null, 'cl_target_id = lt_id' )
-				->where( [
-					'cl_from' => $row->page_id,
-					'lt_namespace' => NS_CATEGORY,
-				] )
-				->caller( __METHOD__ )->fetchFieldValues();
+			if ( $hasLinkTarget ) {
+				$pageCats = $dbr->newSelectQueryBuilder()
+					->select( 'lt_title' )
+					->from( 'categorylinks' )
+					->join( 'linktarget', null, 'cl_target_id = lt_id' )
+					->where( [
+						'cl_from' => $row->page_id,
+						'lt_namespace' => NS_CATEGORY,
+					] )
+					->caller( __METHOD__ )->fetchFieldValues();
+			} else {
+				$pageCats = $dbr->newSelectQueryBuilder()
+					->select( 'cl_to' )
+					->from( 'categorylinks' )
+					->where( [ 'cl_from' => $row->page_id ] )
+					->caller( __METHOD__ )->fetchFieldValues();
+			}
 
 			$articles[] = [
 				'title' => $row->page_title,
 				'summary' => $summary,
-				'bytes' => $row->page_len,
 				'categories' => $pageCats,
 			];
 		}
@@ -262,61 +227,75 @@ class GenerateAssistedSearchGist extends Maintenance {
 		$lines[] = "Stats: {$stats['articles']} articles, {$stats['categories']} categories";
 		$lines[] = '';
 
-		$lines[] = '=== CATEGORIES ===';
-		foreach ( $categories as $cat => $subcats ) {
-			$lines[] = str_replace( '_', ' ', $cat );
-			foreach ( $subcats as $sub ) {
-				$lines[] = '  ' . str_replace( '_', ' ', $sub );
+		$lines[] = '=== CATEGORIES (prefix: `Category:`) ===';
+		foreach ( $categories as $cat ) {
+			$catSize += strlen( $cat ) + 1;
+			if ( $catSize > 15000 ) {
+				$lines[] = '(category list truncated)';
+				break;
 			}
+			$lines[] = $cat;
 		}
 		$lines[] = '';
+
+		$frequentTitleSet = array_flip( array_keys( $frequentTitles ) );
 
 		$lines[] = '=== ARTICLES ===';
-		foreach ( $articles as $article ) {
-			$title = str_replace( '_', ' ', $article['title'] );
-			$catStr = $article['categories'] ? ' (' . implode( ' > ', array_map( static fn ( $c ) => str_replace( '_', ' ', $c ), $article['categories'] ) ) . ')' : '';
-			$lines[] = "[$title]$catStr - {$article['bytes']} bytes";
-			if ( $article['summary'] ) {
-				$lines[] = '  ' . $article['summary'];
-			}
-		}
-		$lines[] = '';
+		$lines[] = 'Format: [Title]\tcategories\tsummary';
+		$articlesSize = 0;
 
-		if ( !empty( $frequentTitles ) ) {
-			$lines[] = '=== FREQUENTLY ACCESSED ===';
-			$shown = 0;
-			foreach ( $frequentTitles as $title => $count ) {
-				if ( $shown >= $maxFrequent ) {
+		$mainPageDone = false;
+		foreach ( $articles as $article ) {
+			if ( !$mainPageDone && $article['title'] === wfMessage( 'mainpage' )->inContentLanguage()->text() ) {
+				$entry = $this->formatArticleEntry( $article, $summaryLength * 15 );
+				$articlesSize += strlen( $entry ) + 1;
+				if ( $articlesSize > 60000 ) {
+					$lines[] = '(article list truncated)';
 					break;
 				}
-
-				$page = \MediaWiki\Title\Title::newFromText( $title );
-				$summary = '';
-				$bytes = 0;
-				if ( $page ) {
-					$wikiPage = $wikiPageFactory->newFromTitle( $page );
-					if ( $wikiPage && $wikiPage->exists() ) {
-						$content = $wikiPage->getContent();
-						if ( $content ) {
-							$summary = $content->getTextForSummary( $summaryLength * 2 );
-						}
-						$bytes = $wikiPage->getContent() ? $wikiPage->getContent()->getSize() : 0;
-					}
-				}
-
-				$displayTitle = str_replace( '_', ' ', $title );
-				$lines[] = "[$displayTitle] - $bytes bytes";
-				$lines[] = "  (appeared in $count search results)";
-				if ( $summary ) {
-					$lines[] = '  ' . $summary;
-				}
-				$shown++;
+				$lines[] = $entry;
+				$mainPageDone = true;
 			}
-			$lines[] = '';
 		}
+
+		foreach ( $articles as $article ) {
+			if ( isset( $frequentTitleSet[$article['title']] ) ) {
+				$entry = $this->formatArticleEntry( $article, $summaryLength );
+				$articlesSize += strlen( $entry ) + 1;
+				if ( $articlesSize > 60000 ) {
+					$lines[] = '(article list truncated)';
+					break;
+				}
+				$lines[] = $entry;
+			}
+		}
+
+		foreach ( $articles as $article ) {
+			$isMainPage = $article['title'] === wfMessage( 'mainpage' )->inContentLanguage()->text();
+			$isFrequent = isset( $frequentTitleSet[$article['title']] );
+			if ( $isMainPage || $isFrequent ) {
+				continue;
+			}
+			$entry = $this->formatArticleEntry( $article, $summaryLength );
+			$articlesSize += strlen( $entry ) + 1;
+			if ( $articlesSize > 60000 ) {
+				$lines[] = '(article list truncated)';
+				break;
+			}
+			$lines[] = $entry;
+		}
+		$lines[] = '';
 
 		return implode( "\n", $lines ) . "\n";
 	}
+
+	private function formatArticleEntry( array $article, int $summaryLength ): string {
+		$title = str_replace( '_', ' ', $article['title'] );
+		$cats = implode( ',', array_map( static fn ( $c ) => str_replace( '_', ' ', $c ), $article['categories'] ) );
+		$summary = str_replace( [ "\t", "\n", "\r" ], ' ', $article['summary'] ?? '' );
+		return "[$title]\t$cats\t$summary";
+	}
+
 }
 
 $maintClass = GenerateAssistedSearchGist::class;

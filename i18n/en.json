@@ -1,6 +1,6 @@
 {
 	"assistedsearch": "Assisted Search",
-	"assistedsearch-desc": "LLM-assisted wiki search using OpenRouter",
+	"assistedsearch-desc": "LLM-assisted wiki search",
 	"assistedsearch-search-button": "Search",
 	"assistedsearch-placeholder": "Enter your search query...",
 	"assistedsearch-no-results": "No relevant sections found.",

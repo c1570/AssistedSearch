@@ -15,50 +15,92 @@ class AssistedSearchService {
 	private LoggerInterface $logger;
 	private ?string $gistFile;
 	private ?string $feedbackFile;
+	private const MAX_RETRIES = 3;
+	private const RETRY_DELAY_MS = 1000;
 
-	private const SYSTEM_PROMPT = <<<'PROMPT'
-You are a wiki search assistant. Your job is to find the most relevant article sections for a user's query.
+	private const SYSTEM_PROMPT = "You are a wiki search assistant. Your job is to find the most relevant article sections for a user's query.";
 
-You have two tools available:
+	private const GIST_INSTRUCTION = <<<PROMPT
 
-1. **search_wiki(query)** - Search the wiki for articles matching a query. Returns sections from the top matching articles. Think about synonyms and related terms to search for.
+The following is a summary of this wiki's contents (categories and articles). Use it to generate better search terms and understand the wiki structure:
 
-2. **retrieve_section(section_url, direction)** - Get the previous or next section of an article relative to a given section URL. Use this when a section seems partially relevant and you want to check if the adjacent section is more relevant.
+```
+PROMPT;
+
+	private const TOOLS_INSTRUCTION = <<<'PROMPT'
+
+You have three tools available:
+
+1. **search_wiki(queries)** - Search the wiki for articles matching one or more queries. Each query should be individual keywords or short terms, NOT natural language phrases or sentences. MediaWiki search is keyword-based. Provide an array of 2-5 relevant keyword strings including synonyms and related terms. Returns sections from the top matching articles for each query, deduplicated by page. Also searches category pages — to search categories, prefix the term with "Category:" (e.g., "Category:Games"). Categories group related articles and are useful for discovering topic clusters.
+
+2. **retrieve_section(section_id, direction)** - Get the previous or next section of an article relative to a given section identified by its section_id (format: "Article_Title" or "Article_Title#Section_Heading").
+
+3. **submit_results(results)** - Submit your final search results. Call this tool when you have finished searching and identified the most relevant sections, or when instructed to.
 
 Instructions:
-- Start by generating good search terms from the user's query, then call search_wiki.
-- Review the returned sections. If none are relevant, try different search terms.
+- Start by extracting individual keywords and synonyms from the user's query, then call search_wiki with all of them at once. Do NOT use natural language phrases or sentences as search terms.
+- To discover related articles on a topic, search for "Category:TopicName" (e.g., "Category:Games", "Category:Hardware"). The gist contains a list of available categories.
+- Review the returned sections. If none are relevant, try different search terms in a new search_wiki call.
 - If a section seems partially relevant, use retrieve_section to check adjacent sections.
-- Once you have found the best results, return a JSON array of the most relevant sections.
-
-Your final response MUST be a valid JSON array (and nothing else) of objects with this format:
-[
-    {
-        "article_title": "Title of the article",
-        "section_heading": "Heading of the section",
-        "section_url": "Full URL to the section",
-        "relevance_explanation": "Brief explanation of why this section is relevant to the query"
-    }
-]
-
-Rank the results from most relevant to least relevant. Include only sections that are genuinely relevant (at least 1, at most 5). If no sections are relevant, return an empty array [].
+- Once you have found the best results or when instructed to, call submit_results with an array of the most relevant sections (1-10 items, ranked from most to least relevant). If no sections are relevant, call submit_results with an empty array [].
+- Do NOT respond with text — always call submit_results to provide your answer.
 PROMPT;
 
 	private const TOOLS = [
 		[
 			'type' => 'function',
 			'function' => [
-				'name' => 'search_wiki',
-				'description' => 'Search the wiki for articles matching a query and return their sections',
+				'name' => 'submit_results',
+				'description' => 'Submit your final search results. Provide an array of 1-10 result objects (relevant sections) ranked from most to least relevant, or an empty array if absolutely nothing was found.',
 				'parameters' => [
 					'type' => 'object',
 					'properties' => [
-						'query' => [
-							'type' => 'string',
+						'results' => [
+							'type' => 'array',
+							'items' => [
+								'type' => 'object',
+								'properties' => [
+									'article_title' => [
+										'type' => 'string',
+										'description' => 'Title of the article',
+									],
+									'section_heading' => [
+										'type' => 'string',
+										'description' => 'Heading of the section',
+									],
+									'section_id' => [
+										'type' => 'string',
+										'description' => 'Section identifier in format "Article_Title#Section_Heading"',
+									],
+									'relevance_explanation' => [
+										'type' => 'string',
+										'description' => 'Brief explanation of why this section is relevant to the query',
+									],
+								],
+								'required' => [ 'article_title', 'section_heading', 'section_id', 'relevance_explanation' ],
+							],
+							'description' => 'Array of relevant sections ranked from most to least relevant (1-10 items)',
+						],
+					],
+					'required' => [ 'results' ],
+				],
+			],
+		],
+		[
+			'type' => 'function',
+			'function' => [
+				'name' => 'search_wiki',
+				'description' => 'Search the wiki for articles matching one or more queries. Returns results grouped by article. Each article has an article_title and a sections array. section_text is included for sections matching the search terms (or the intro) within a text budget; other sections have section_text set to null. Use retrieve_section to get full text for any section that interests you.',
+				'parameters' => [
+					'type' => 'object',
+					'properties' => [
+						'queries' => [
+							'type' => 'array',
+							'items' => [ 'type' => 'string' ],
 							'description' => 'Search terms to find relevant wiki articles',
 						],
 					],
-					'required' => [ 'query' ],
+					'required' => [ 'queries' ],
 				],
 			],
 		],
@@ -66,13 +108,13 @@ PROMPT;
 			'type' => 'function',
 			'function' => [
 				'name' => 'retrieve_section',
-				'description' => 'Get the previous or next section of an article relative to a given section URL',
+				'description' => 'Get the previous or next section of an article relative to a given section_id (format: "Article_Title" or "Article_Title#Section_Heading")',
 				'parameters' => [
 					'type' => 'object',
 					'properties' => [
-						'section_url' => [
+						'section_id' => [
 							'type' => 'string',
-							'description' => 'The URL of the current section',
+							'description' => 'The section_id of the current section',
 						],
 						'direction' => [
 							'type' => 'string',
@@ -80,7 +122,7 @@ PROMPT;
 							'description' => 'Whether to get the previous or next section',
 						],
 					],
-					'required' => [ 'section_url', 'direction' ],
+					'required' => [ 'section_id', 'direction' ],
 				],
 			],
 		],
@@ -107,7 +149,7 @@ PROMPT;
 	}
 
 	/**
-	 * @return array<int, array{article_title: string, section_heading: string, section_url: string, relevance_explanation: string}>
+	 * @return array<int, array{article_title: string, section_heading: string, section_id: string, section_url: string, relevance_explanation: string}>
 	 * @throws \Exception
 	 */
 	public function search( string $userQuery, string $langCode = 'en' ): array {
@@ -118,26 +160,34 @@ PROMPT;
 
 		$client = new OpenRouterClient( $this->apiKey );
 
-		$systemPrompt = self::SYSTEM_PROMPT . "\n\nIMPORTANT: You MUST respond in the language with code \"$langCode\". All text in your final answer (relevance_explanation, section_heading, article_title) must be in that language.";
+		$systemPrompt = self::SYSTEM_PROMPT;
 
 		$gistContent = $this->loadGist();
 		if ( $gistContent !== '' ) {
-			$systemPrompt .= "\n\nThe following is a summary of this wiki's contents (categories and articles). Use it to generate better search terms and understand the wiki structure:\n\n```\n{$gistContent}\n```";
+			$systemPrompt .= self::GIST_INSTRUCTION . "\n{$gistContent}\n```";
 		}
+
+		$systemPrompt .= self::TOOLS_INSTRUCTION;
+
+		$systemPrompt .= "\n\nIMPORTANT: relevance_explanation in submit_results MUST use the language with code \"$langCode\".";
 
 		$messages = [
 			[ 'role' => 'system', 'content' => $systemPrompt ],
 			[ 'role' => 'user', 'content' => $userQuery ],
 		];
 
-		for ( $round = 0; $round < $this->maxRounds; $round++ ) {
-			$this->logger->info( "AssistedSearch: Round {round}/{max} — calling LLM (model={model})", [
-				'round' => $round + 1,
-				'max' => $this->maxRounds,
+		$state = 'searching';
+		$rounds = 0;
+
+		while ( true ) {
+			$rounds++;
+			$this->logger->info( "AssistedSearch: Round {round} — state={state} (model={model})", [
+				'round' => $rounds,
+				'state' => $state,
 				'model' => $this->model,
 			] );
 
-			$result = $client->chatEx( $messages, $this->model, [
+			$result = $this->callLlm( $client, $messages, [
 				'tools' => self::TOOLS,
 				'tool_choice' => 'auto',
 			] );
@@ -151,56 +201,132 @@ PROMPT;
 			}
 			$messages[] = $assistantMessage;
 
-			if ( empty( $result['tool_calls'] ) ) {
-				$this->logger->info( "AssistedSearch: LLM returned final response (no tool calls)" );
-				$this->logger->debug( "AssistedSearch: Final LLM content: {content}", [
-					'content' => $result['content'] ?? '',
+			if ( !empty( $result['tool_calls'] ) ) {
+				$submittedResults = $this->processToolCalls( $result['tool_calls'], $messages, $state );
+				if ( $submittedResults !== null ) {
+					$this->logConversation( $messages );
+					$this->logger->info( "AssistedSearch: Got {count} results via submit_results", [ 'count' => count( $submittedResults ) ] );
+					$this->writeFeedback( $userQuery, $submittedResults );
+					return $submittedResults;
+				}
+				$this->logConversation( $messages );
+			} else {
+				$finishReason = $result['finish_reason'] ?? '';
+				$this->logger->warning( "AssistedSearch: LLM returned no tool calls (state={state}, finish_reason={reason}). Full reply:\n{reply}", [
+					'state' => $state,
+					'reason' => $finishReason,
+					'reply' => self::safeJsonEncode( $result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT ),
 				] );
-				$parsed = $this->parseFinalResponse( $result['content'] ?? '' );
-				$this->logger->info( "AssistedSearch: Parsed {count} results", [ 'count' => count( $parsed ) ] );
-				$this->writeFeedback( $userQuery, $parsed );
-				return $parsed;
+				if ( $finishReason === 'length' ) {
+					$messages[] = [
+						'role' => 'system',
+						'content' => 'Your response was too long. Please give a shorter (tool calling only!) response.',
+					];
+					continue;
+				}
 			}
 
-			foreach ( $result['tool_calls'] as $toolCall ) {
-				$functionName = $toolCall['function']['name'];
-				$arguments = json_decode( $toolCall['function']['arguments'], true );
+			if ( $state === 'searching' && $rounds >= $this->maxRounds ) {
+				$this->logger->info( "AssistedSearch: Max rounds reached, transitioning to final state" );
+				$messages[] = [
+					'role' => 'system',
+					'content' => 'STOP exploring and call submit_results NOW with your findings. relevance_explanation MUST use the language with code "' . $langCode . '". Submit 0 results only if there was absolutely no lead.',
+				];
+				$state = 'final';
+				continue;
+			}
 
-				$this->logger->info( "AssistedSearch: Tool call: {tool}({args})", [
-					'tool' => $functionName,
-					'args' => json_encode( $arguments ?? [] ),
-				] );
+			if ( $rounds >= 5 ) {
+				$this->logger->warning( "AssistedSearch: Max total rounds (5) reached, returning empty results" );
+				$this->logConversation( $messages );
+				return [];
+			}
+		}
+	}
 
-				$toolResult = $this->executeTool( $functionName, $arguments ?? [] );
+	/**
+	 * Process tool calls. Executes non-submit tools normally, returns results from submit_results.
+	 *
+	 * @param array $toolCalls
+	 * @param array $messages Messages array to append tool results to
+	 * @return array|null Extracted results if submit_results was called, null otherwise
+	 */
+	private function processToolCalls( array $toolCalls, array &$messages, string $state = 'searching' ): ?array {
+		$submittedResults = null;
 
-				$this->logger->info( "AssistedSearch: Tool result: {tool} returned {count} items", [
-					'tool' => $functionName,
-					'count' => count( $toolResult ),
-				] );
-				$this->logger->debug( "AssistedSearch: Tool result detail: {detail}", [
-					'detail' => json_encode( $toolResult, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ),
-				] );
+		foreach ( $toolCalls as $toolCall ) {
+			$functionName = $toolCall['function']['name'];
+			$arguments = json_decode( $toolCall['function']['arguments'], true );
 
+			$this->logger->info( "AssistedSearch: Tool call: {tool}({args})", [
+				'tool' => $functionName,
+				'args' => self::safeJsonEncode( $arguments ?? [] ),
+			] );
+
+			if ( $functionName === 'submit_results' ) {
+				$submittedResults = $this->extractSubmitResults( $arguments ?? [] );
 				$messages[] = [
 					'role' => 'tool',
 					'tool_call_id' => $toolCall['id'],
-					'content' => json_encode( $toolResult ),
+					'content' => self::safeJsonEncode( [ 'status' => 'ok', 'count' => count( $submittedResults ) ] ),
 				];
+				continue;
 			}
+
+			if ( $state === 'final' ) {
+				$this->logger->warning( "AssistedSearch: LLM called {tool} in final state, rejecting", [ 'tool' => $functionName ] );
+				$messages[] = [
+					'role' => 'tool',
+					'tool_call_id' => $toolCall['id'],
+					'content' => self::safeJsonEncode( [
+						'error' => "You must call the submit_results tool now. Do not call $functionName — you have already used all your search rounds.",
+					] ),
+				];
+				continue;
+			}
+
+			$toolResult = $this->executeTool( $functionName, $arguments ?? [] );
+
+			$this->logger->info( "AssistedSearch: Tool result: {tool} returned {count} items", [
+				'tool' => $functionName,
+				'count' => count( $toolResult ),
+			] );
+
+			$messages[] = [
+				'role' => 'tool',
+				'tool_call_id' => $toolCall['id'],
+				'content' => self::safeJsonEncode( $toolResult ),
+			];
 		}
 
-		$this->logger->info( "AssistedSearch: Max rounds ({max}) reached, requesting final answer", [
-			'max' => $this->maxRounds,
-		] );
-		$messages[] = [
-			'role' => 'user',
-			'content' => 'Please provide your final answer as a JSON array now, based on all the information you have gathered.',
-		];
-		$result = $client->chatEx( $messages, $this->model, [] );
-		$parsed = $this->parseFinalResponse( $result['content'] ?? '' );
-		$this->logger->info( "AssistedSearch: Final answer parsed {count} results", [ 'count' => count( $parsed ) ] );
-		$this->writeFeedback( $userQuery, $parsed );
-		return $parsed;
+		return $submittedResults;
+	}
+
+	/**
+	 * @return array<int, array{article_title: string, section_heading: string, section_id: string, section_url: string, relevance_explanation: string}>
+	 */
+	private function extractSubmitResults( array $args ): array {
+		$raw = $args['results'] ?? [];
+		if ( !is_array( $raw ) ) {
+			return [];
+		}
+
+		$results = [];
+		foreach ( $raw as $item ) {
+			$sectionId = $item['section_id'] ?? '';
+			if ( !$sectionId || !isset( $item['article_title'], $item['section_heading'] ) ) {
+				continue;
+			}
+			$results[] = [
+				'article_title' => $item['article_title'],
+				'section_heading' => $item['section_heading'],
+				'section_id' => $sectionId,
+				'section_url' => $this->sectionExtractor->makeFullUrl( $sectionId ),
+				'relevance_explanation' => $item['relevance_explanation'] ?? '',
+			];
+		}
+
+		return $results;
 	}
 
 	private function loadGist(): string {
@@ -240,7 +366,7 @@ PROMPT;
 		}
 
 		foreach ( $results as $result ) {
-			fwrite( $handle, json_encode( [
+			fwrite( $handle, self::safeJsonEncode( [
 				'query' => $query,
 				'article_title' => $result['article_title'],
 				'section_heading' => $result['section_heading'],
@@ -254,10 +380,10 @@ PROMPT;
 		try {
 			switch ( $name ) {
 				case 'search_wiki':
-					return $this->toolExecutor->executeSearch( $args['query'] ?? '' );
+					return $this->toolExecutor->executeSearch( $args['queries'] ?? [ $args['query'] ?? '' ] );
 				case 'retrieve_section':
 					return $this->toolExecutor->executeRetrieve(
-						$args['section_url'] ?? '',
+						$args['section_id'] ?? '',
 						$args['direction'] ?? 'next'
 					) ?? [ 'error' => 'Section not found' ];
 				default:
@@ -268,34 +394,40 @@ PROMPT;
 		}
 	}
 
-	/**
-	 * @return array<int, array{article_title: string, section_heading: string, section_url: string, relevance_explanation: string}>
-	 */
-	private function parseFinalResponse( string $content ): array {
-		$json = $content;
-		if ( preg_match( '/```(?:json)?\s*(\[[\s\S]*?\])\s*```/', $content, $matches ) ) {
-			$json = $matches[1];
-		} elseif ( preg_match( '/(\[[\s\S]*\])\s*$/', $content, $matches ) ) {
-			$json = $matches[1];
-		}
-
-		$parsed = json_decode( $json, true );
-		if ( !is_array( $parsed ) ) {
-			return [];
-		}
-
-		$results = [];
-		foreach ( $parsed as $item ) {
-			if ( isset( $item['article_title'], $item['section_heading'], $item['section_url'] ) ) {
-				$results[] = [
-					'article_title' => $item['article_title'],
-					'section_heading' => $item['section_heading'],
-					'section_url' => $item['section_url'],
-					'relevance_explanation' => $item['relevance_explanation'] ?? '',
-				];
+	private function callLlm( OpenRouterClient $client, array $messages, array $options ): array {
+		$lastException = null;
+		for ( $attempt = 1; $attempt <= self::MAX_RETRIES; $attempt++ ) {
+			try {
+				return $client->chatEx( $messages, $this->model, $options );
+			} catch ( \Exception $e ) {
+				$lastException = $e;
+				$retryable = str_contains( $e->getMessage(), '502' )
+					|| str_contains( $e->getMessage(), '503' )
+					|| str_contains( $e->getMessage(), '429' )
+					|| str_contains( $e->getMessage(), 'timeout' )
+					|| str_contains( $e->getMessage(), 'Provider returned error' );
+				if ( !$retryable || $attempt === self::MAX_RETRIES ) {
+					break;
+				}
+				$this->logger->warning( "AssistedSearch: LLM call failed (attempt {attempt}/{max}), retrying: {error}", [
+					'attempt' => $attempt,
+					'max' => self::MAX_RETRIES,
+					'error' => $e->getMessage(),
+				] );
+				usleep( self::RETRY_DELAY_MS * 1000 * $attempt );
 			}
 		}
+		throw $lastException;
+	}
 
-		return $results;
+	private function logConversation( array $messages ): void {
+		$this->logger->debug( "AssistedSearch: Conversation ({count} messages)\n{conversation}", [
+			'count' => count( $messages ),
+			'conversation' => self::safeJsonEncode( $messages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT ),
+		] );
+	}
+
+	private static function safeJsonEncode( mixed $value, int $flags = 0 ): string|false {
+		return json_encode( $value, $flags | JSON_INVALID_UTF8_SUBSTITUTE );
 	}
 }
