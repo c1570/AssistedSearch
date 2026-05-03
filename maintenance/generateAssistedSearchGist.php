@@ -17,13 +17,14 @@ class GenerateAssistedSearchGist extends Maintenance {
 
 	public function __construct() {
 		parent::__construct();
-		$this->addDescription( 'Generate a gist file for AssistedSearch containing wiki categories, articles, and frequently accessed pages.' );
+		$this->addDescription( 'Generate a gist file for AssistedSearch containing wiki articles and frequently accessed pages.' );
 		$this->addOption( 'output', 'Output file path (default: $wgAssistedSearchGistFile or false)', false, true );
 		$this->addOption( 'min-article-length', 'Minimum page length in bytes to include (default: 500)', false, true );
 		$this->addOption( 'feedback-file', 'Feedback JSONL file path (default: $wgAssistedSearchFeedbackFile)', false, true );
 		$this->addOption( 'max-articles', 'Maximum number of articles to include (default: no limit)', false, true );
 		$this->addOption( 'max-frequent', 'Max frequently accessed articles to include (default: 20)', false, true );
 		$this->addOption( 'summary-length', 'Max chars per article summary (default: 200)', false, true );
+		$this->addOption( 'max-size', 'Maximum total size in bytes for articles section (default: 80000)', false, true );
 	}
 
 	public function execute() {
@@ -36,9 +37,10 @@ class GenerateAssistedSearchGist extends Maintenance {
 
 		$minLength = (int)$this->getOption( 'min-article-length', $config->has( 'AssistedSearchMinArticleLength' ) ? $config->get( 'AssistedSearchMinArticleLength' ) : 500 );
 		$feedbackFile = $this->getOption( 'feedback-file', $config->has( 'AssistedSearchFeedbackFile' ) ? $config->get( 'AssistedSearchFeedbackFile' ) : false );
-		$maxArticles = $this->getOption( 'max-article-length', null );
+		$maxArticles = $this->getOption( 'max-articles', null );
 		$maxFrequent = (int)$this->getOption( 'max-frequent', 20 );
 		$summaryLength = (int)$this->getOption( 'summary-length', 200 );
+		$maxSize = (int)$this->getOption( 'max-size', $config->has( 'AssistedSearchGistMaxSize' ) ? $config->get( 'AssistedSearchGistMaxSize' ) : 80000 );
 
 		$dbr = $this->getReplicaDB();
 		$services = MediaWikiServices::getInstance();
@@ -47,11 +49,10 @@ class GenerateAssistedSearchGist extends Maintenance {
 		$this->output( "Generating AssistedSearch gist...\n" );
 
 		$stats = $this->getStats( $dbr );
-		$categories = $this->buildCategoryList( $dbr );
 		$frequentTitles = $this->loadFeedback( $feedbackFile );
 		$articles = $this->getArticles( $dbr, $wikiPageFactory, $minLength, $maxArticles, $summaryLength, $frequentTitles );
 
-		$gist = $this->renderGist( $stats, $categories, $articles, $frequentTitles, $maxFrequent, $summaryLength, $wikiPageFactory );
+		$gist = $this->renderGist( $stats, $articles, $frequentTitles, $maxFrequent, $summaryLength, $maxSize, $wikiPageFactory );
 
 		$dir = dirname( $outputPath );
 		if ( !is_dir( $dir ) ) {
@@ -67,28 +68,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 	private function getStats( $dbr ): array {
 		return [
 			'articles' => (int)$dbr->selectField( 'page', 'COUNT(*)', [ 'page_namespace' => NS_MAIN ], __METHOD__ ),
-			'categories' => (int)$dbr->selectField( 'page', 'COUNT(*)', [ 'page_namespace' => NS_CATEGORY ], __METHOD__ ),
 		];
-	}
-
-	private function buildCategoryList( $dbr ): array {
-		$titles = $dbr->newSelectQueryBuilder()
-			->select( 'page_title' )
-			->from( 'page' )
-			->where( [ 'page_namespace' => NS_CATEGORY ] )
-			->orderBy( 'page_title' )
-			->caller( __METHOD__ )->fetchFieldValues();
-
-		$result = [];
-		foreach ( $titles as $title ) {
-			$display = str_replace( '_', ' ', $title );
-			// Omit year-only categories (e.g., "1983", "2004") — they add noise without search value
-			if ( preg_match( '/^\d+$/', $display ) ) {
-				continue;
-			}
-			$result[] = $display;
-		}
-		return $result;
 	}
 
 	private function loadFeedback( ?string $feedbackFile ): array {
@@ -220,22 +200,11 @@ class GenerateAssistedSearchGist extends Maintenance {
 		return $articles;
 	}
 
-	private function renderGist( array $stats, array $categories, array $articles, array $frequentTitles, int $maxFrequent, int $summaryLength, $wikiPageFactory ): string {
+	private function renderGist( array $stats, array $articles, array $frequentTitles, int $maxFrequent, int $summaryLength, int $maxSize, $wikiPageFactory ): string {
 		$lines = [];
 		$lines[] = 'Wiki Gist for AssistedSearch';
 		$lines[] = 'Generated: ' . wfTimestampNow();
-		$lines[] = "Stats: {$stats['articles']} articles, {$stats['categories']} categories";
-		$lines[] = '';
-
-		$lines[] = '=== CATEGORIES (prefix: `Category:`) ===';
-		foreach ( $categories as $cat ) {
-			$catSize += strlen( $cat ) + 1;
-			if ( $catSize > 15000 ) {
-				$lines[] = '(category list truncated)';
-				break;
-			}
-			$lines[] = $cat;
-		}
+		$lines[] = "Stats: {$stats['articles']} articles";
 		$lines[] = '';
 
 		$frequentTitleSet = array_flip( array_keys( $frequentTitles ) );
@@ -249,7 +218,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 			if ( !$mainPageDone && $article['title'] === wfMessage( 'mainpage' )->inContentLanguage()->text() ) {
 				$entry = $this->formatArticleEntry( $article, $summaryLength * 15 );
 				$articlesSize += strlen( $entry ) + 1;
-				if ( $articlesSize > 60000 ) {
+				if ( $articlesSize > $maxSize ) {
 					$lines[] = '(article list truncated)';
 					break;
 				}
@@ -262,7 +231,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 			if ( isset( $frequentTitleSet[$article['title']] ) ) {
 				$entry = $this->formatArticleEntry( $article, $summaryLength );
 				$articlesSize += strlen( $entry ) + 1;
-				if ( $articlesSize > 60000 ) {
+				if ( $articlesSize > $maxSize ) {
 					$lines[] = '(article list truncated)';
 					break;
 				}
@@ -278,7 +247,7 @@ class GenerateAssistedSearchGist extends Maintenance {
 			}
 			$entry = $this->formatArticleEntry( $article, $summaryLength );
 			$articlesSize += strlen( $entry ) + 1;
-			if ( $articlesSize > 60000 ) {
+			if ( $articlesSize > $maxSize ) {
 				$lines[] = '(article list truncated)';
 				break;
 			}

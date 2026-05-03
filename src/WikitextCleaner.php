@@ -22,7 +22,13 @@ class WikitextCleaner {
 		$text = preg_replace( '/\[https?:\/\/[^\s\]]+\]/i', '', $text );
 		$text = preg_replace( '/https?:\/\/[^\s<\]]+/', '', $text );
 
+		$text = preg_replace_callback( "/''(.+?)''/s", static function ( $m ) {
+			return strlen( $m[1] ) >= 30 ? '' : $m[0];
+		}, $text );
+
 		$text = preg_replace( "/'{2,}/", '', $text );
+
+		$text = preg_replace( '/__[A-Z]+__/', '', $text );
 
 		$text = Sanitizer::stripAllTags( $text );
 
@@ -32,7 +38,13 @@ class WikitextCleaner {
 
 		$limit = $maxLength ?? 2000;
 		if ( strlen( $text ) > $limit ) {
-			$text = substr( $text, 0, $limit ) . '...';
+			$window = substr( $text, $limit - 100, 200 );
+			$pos = strrpos( $window, '.' );
+			if ( $pos !== false && $pos < 150 ) {
+				$text = substr( $text, 0, $limit - 100 + $pos + 1 );
+			} else {
+				$text = substr( $text, 0, $limit ) . '...';
+			}
 		}
 
 		return $text;

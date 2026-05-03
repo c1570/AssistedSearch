@@ -22,10 +22,11 @@ LLM-assisted wiki search using OpenRouter. Provides `Special:AssistedSearch`.
 | `$wgAssistedSearchGistFile` | `false` | Path to wiki gist file; included in LLM prompt if set |
 | `$wgAssistedSearchFeedbackFile` | `false` | Path to JSONL feedback log for search result tracking |
 | `$wgAssistedSearchMinArticleLength` | `500` | Min page length in bytes to include in gist |
+| `$wgAssistedSearchGistMaxSize` | `80000` | Max total size in bytes for the articles section of the gist |
 
 ## Wiki Gist
 
-A gist file gives the LLM context about the wiki's categories and articles so it generates better search terms.
+A gist file gives the LLM context about the wiki's articles so it generates better search terms.
 
 Generate it with the maintenance script (run via cron):
 
@@ -35,10 +36,20 @@ php maintenance/run.php AssistedSearch:generateAssistedSearchGist \
   --feedback-file=$IP/cache/assistedsearch-feedback.jsonl
 ```
 
+Available options:
+- `--output` — output file path (default: `$wgAssistedSearchGistFile`)
+- `--min-article-length` — minimum page length in bytes to include (default: 500)
+- `--max-articles` — maximum number of articles to include (default: no limit)
+- `--max-frequent` — max frequently accessed articles to include (default: 20)
+- `--summary-length` — max chars per article summary (default: 200)
+- `--max-size` — maximum total size in bytes for articles section (default: 80000)
+
 The gist includes:
-- **Categories**: top-level categories and their subcategories (2 levels deep)
-- **Articles**: all articles above `$wgAssistedSearchMinArticleLength` with a short summary and category membership
+- **Articles**: all articles above the minimum length with a short summary and category membership
 - **Frequently accessed**: articles that appear most often in search results (from feedback log), with longer summaries
+- **Main page**: included with an extended summary (15× the normal length)
+
+Each article's wikitext is cleaned before summarization: templates are removed, wikilinks are resolved to their display text, long italicized passages are dropped, and magic words (e.g. `__NOTOC__`) are stripped. Summaries are truncated at sentence boundaries where possible.
 
 The maintenance script also prunes feedback entries older than 30 days.
 

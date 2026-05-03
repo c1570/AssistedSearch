@@ -50,6 +50,10 @@
 		"AssistedSearchMinArticleLength": {
 			"description": "Minimum page length in bytes to include in gist file.",
 			"value": 500
+		},
+		"AssistedSearchGistMaxSize": {
+			"description": "Maximum total size in bytes for the articles section of the gist file.",
+			"value": 80000
 		}
 	},
 	"manifest_version": 2
