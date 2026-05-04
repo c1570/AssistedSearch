@@ -24,18 +24,15 @@ class SpecialAssistedSearch extends SpecialPage {
 			return;
 		}
 
-		$output->addHTML( $this->getSearchForm() );
+		$query = $request->getText( 'query' );
+
+		$output->addHTML( $this->getSearchForm( $query ) );
 		$output->addWikiMsg( 'assistedsearch-privacy-notice' );
 		$output->addWikiMsg( 'assistedsearch-time-notice' );
 
-		$query = $request->getText( 'query' );
 		if ( $query === '' ) {
 			return;
 		}
-
-		$output->addHTML( '<h2>' . htmlspecialchars(
-			$this->msg( 'assistedsearch-results-heading', $query )->text()
-		) . '</h2>' );
 
 		$config = $this->getConfig();
 		$maxConcurrent = $config->get( 'AssistedSearchMaxConcurrent' );
@@ -54,9 +51,13 @@ class SpecialAssistedSearch extends SpecialPage {
 		}
 
 		if ( !$lock ) {
-			$output->addWikiMsg( 'assistedsearch-error-concurrency' );
+			$output->addHTML( '<div style="padding:12px 16px;margin:1em 0;background-color:#fee7e6;border:1px solid #d33;color:#2a2a2a;font-weight:bold;">' . $this->msg( 'assistedsearch-error-concurrency' )->escaped() . '</div>' );
 			return;
 		}
+
+		$output->addHTML( '<h2>' . htmlspecialchars(
+			$this->msg( 'assistedsearch-results-heading', $query )->text()
+		) . '</h2>' );
 
 		try {
 			$service = $this->createService( $apiKey );
@@ -73,14 +74,15 @@ class SpecialAssistedSearch extends SpecialPage {
 		}
 	}
 
-	private function getSearchForm(): string {
+	private function getSearchForm( string $query = '' ): string {
 		$buttonText = $this->msg( 'assistedsearch-search-button' )->text();
 		$placeholder = $this->msg( 'assistedsearch-placeholder' )->text();
 		$actionUrl = htmlspecialchars( $this->getPageTitle()->getLocalURL() );
+		$queryValue = htmlspecialchars( $query );
 
 		return <<<HTML
 <form method="post" action="{$actionUrl}">
-	<input type="text" name="query" placeholder="{$placeholder}" size="60" autofocus autocomplete="off" />
+	<input type="text" name="query" value="{$queryValue}" placeholder="{$placeholder}" size="60" autofocus autocomplete="off" />
 	<input type="submit" value="{$buttonText}" />
 </form>
 HTML;
