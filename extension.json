@@ -22,6 +22,17 @@
 	"MessagesDirs": {
 		"AssistedSearch": "i18n"
 	},
+	"AvailableRights": [
+		"assistedsearch"
+	],
+	"GroupPermissions": {
+		"*": {
+			"assistedsearch": true
+		},
+		"user": {
+			"assistedsearch": true
+		}
+	},
 	"config": {
 		"AssistedSearchApiKey": {
 			"description": "OpenRouter API key for LLM-assisted search",

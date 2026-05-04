@@ -10,11 +10,14 @@ use Wikimedia\ObjectCache\EmptyBagOStuff;
 class SpecialAssistedSearch extends SpecialPage {
 
 	public function __construct() {
-		parent::__construct( 'AssistedSearch' );
+		parent::__construct( 'AssistedSearch', 'assistedsearch' );
+		// Parameters: page name, required permission, listed in Special:SpecialPages
 	}
 
 	public function execute( $par ) {
 		$this->setHeaders();
+		$this->checkPermissions();
+
 		$output = $this->getOutput();
 		$request = $this->getRequest();
 

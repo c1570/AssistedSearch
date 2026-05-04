@@ -10,5 +10,7 @@
 	"assistedsearch-relevance": "Relevanz: $1",
 	"assistedsearch-privacy-notice": "Abfragen werden protokolliert und an externe LLM-Anbieter gesendet.",
 	"assistedsearch-time-notice": "Die Ausführung der Abfrage kann bis zu drei Minuten dauern.",
-	"assistedsearch-error-concurrency": "Derzeit werden bereits zu viele Suchen ausgeführt. Bitte versuchen Sie es in einem Moment erneut."
+	"assistedsearch-error-concurrency": "Derzeit werden bereits zu viele Suchen ausgeführt. Bitte versuchen Sie es in einem Moment erneut.",
+	"action-assistedsearch": "Suchassistent nutzen",
+	"right-assistedsearch": "Den Suchassistenten nutzen"
 }

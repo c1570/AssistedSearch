@@ -64,6 +64,14 @@ $wgDebugLogGroups['AssistedSearch'] = [
 ];
 ```
 
+## Permissions
+
+The `assistedsearch` right controls who can use the search. By default, everyone (including anonymous users) has access. To restrict to logged-in users:
+
+```php
+$wgGroupPermissions['*']['assistedsearch'] = false;
+```
+
 ## Installation
 
 ```

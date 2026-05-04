@@ -10,5 +10,7 @@
 	"assistedsearch-relevance": "Relevance: $1",
 	"assistedsearch-privacy-notice": "Queries will be logged and sent to external LLM providers.",
 	"assistedsearch-time-notice": "Executing the query can take up to three minutes.",
-	"assistedsearch-error-concurrency": "Too many searches are running concurrently. Please try again in a moment."
+	"assistedsearch-error-concurrency": "Too many searches are running concurrently. Please try again in a moment.",
+	"action-assistedsearch": "use assisted search",
+	"right-assistedsearch": "Use the assisted search feature"
 }
