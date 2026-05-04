@@ -39,7 +39,7 @@ You have three tools available:
 
 Instructions:
 - Start by extracting individual keywords and synonyms from the user's query, then call search_wiki with all of them at once. Do NOT use natural language phrases or sentences as search terms.
-- To discover related articles on a topic, search for "Category:TopicName" (e.g., "Category:Games", "Category:Hardware"). The gist contains a list of available categories.
+- To discover related articles on a topic, search for "Category:TopicName" (e.g., "Category:Newsletter", "Category:Hardware").
 - Review the returned sections. If none are relevant, try different search terms in a new search_wiki call.
 - If a section seems partially relevant, use retrieve_section to check adjacent sections.
 - Once you have found the best results or when instructed to, call submit_results with an array of the most relevant sections (1-10 items, ranked from most to least relevant). If no sections are relevant, call submit_results with an empty array [].
@@ -169,7 +169,7 @@ PROMPT;
 
 		$systemPrompt .= self::TOOLS_INSTRUCTION;
 
-		$systemPrompt .= "\n\nIMPORTANT: relevance_explanation in submit_results MUST use the language with code \"$langCode\".";
+		$systemPrompt .= "\n\nDetect the language of the user's query and use that same language for all relevance_explanation values in submit_results. If the query language is ambiguous, fall back to the wiki's default language (\"$langCode\").";
 
 		$messages = [
 			[ 'role' => 'system', 'content' => $systemPrompt ],
@@ -230,7 +230,15 @@ PROMPT;
 				$this->logger->info( "AssistedSearch: Max rounds reached, transitioning to final state" );
 				$messages[] = [
 					'role' => 'system',
-					'content' => 'STOP exploring and call submit_results NOW with your findings. relevance_explanation MUST use the language with code "' . $langCode . '". Submit 0 results only if there was absolutely no lead.',
+					'content' => 'The next message repeats the original query for your reference.',
+				];
+				$messages[] = [
+					'role' => 'user',
+					'content' => $userQuery,
+				];
+				$messages[] = [
+					'role' => 'system',
+					'content' => 'STOP exploring and call submit_results NOW with your findings. Use the same language as the user\'s query for all relevance_explanation values (fall back to "' . $langCode . '" if ambiguous). Submit 0 results only if there was absolutely no lead. Call tool submit_results now.',
 				];
 				$state = 'final';
 				continue;
