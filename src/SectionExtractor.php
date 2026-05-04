@@ -39,7 +39,7 @@ class SectionExtractor {
 		if ( $sectionContent ) {
 			$sections[] = [
 				'article_title' => $title->getFullText(),
-				'section_heading' => '(Introduction)',
+				'section_heading' => '',
 				'section_text' => WikitextCleaner::cleanText( $sectionContent->getTextForSearchIndex() ),
 				'section_id' => $dbkey,
 				'section_index' => 0,
@@ -97,7 +97,7 @@ class SectionExtractor {
 			}
 			return [
 				'article_title' => $title->getFullText(),
-				'section_heading' => '(Introduction)',
+				'section_heading' => '',
 				'section_text' => WikitextCleaner::cleanText( $sectionContent->getTextForSearchIndex() ),
 				'section_id' => $dbkey,
 				'section_index' => 0,
@@ -192,7 +192,7 @@ class SectionExtractor {
 			if ( $sectionContent ) {
 				return [
 					'article_title' => $title->getFullText(),
-					'section_heading' => '(Introduction)',
+					'section_heading' => '',
 					'section_text' => WikitextCleaner::cleanText( $sectionContent->getTextForSearchIndex() ),
 					'section_id' => $dbkey,
 					'section_index' => 0,

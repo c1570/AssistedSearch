@@ -96,13 +96,13 @@ HTML;
 		foreach ( $results as $i => $result ) {
 			$rank = $i + 1;
 			$articleTitle = htmlspecialchars( $result['article_title'] );
-			$sectionHeading = htmlspecialchars( $result['section_heading'] );
+			$sectionHeading = $result['section_heading'] !== '' ? ' / ' . htmlspecialchars( $result['section_heading'] ) : '';
 			$sectionUrl = htmlspecialchars( $result['section_url'] );
 			$relevance = htmlspecialchars( $result['relevance_explanation'] );
 
 			$html .= <<<HTML
 <li class="assistedsearch-result">
-	<a href="{$sectionUrl}"><b>{$articleTitle}</b> / {$sectionHeading}</a><br />
+	<a href="{$sectionUrl}"><b>{$articleTitle}</b>{$sectionHeading}</a><br />
 	{$relevance}
 </li>
 HTML;
