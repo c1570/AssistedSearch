@@ -30,8 +30,10 @@ class SpecialAssistedSearch extends SpecialPage {
 		$query = $request->getText( 'query' );
 
 		$output->addHTML( $this->getSearchForm( $query ) );
-		$output->addWikiMsg( 'assistedsearch-privacy-notice' );
-		$output->addWikiMsg( 'assistedsearch-time-notice' );
+		$notice = $this->getConfig()->get( 'AssistedSearchNotice' );
+		if ( $notice ) {
+			$output->addHTML( '<p>' . htmlspecialchars( $notice ) . '</p>' );
+		}
 
 		if ( $query === '' ) {
 			return;

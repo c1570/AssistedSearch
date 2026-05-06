@@ -23,6 +23,7 @@ LLM-assisted wiki search using OpenRouter. Provides `Special:AssistedSearch`.
 | `$wgAssistedSearchFeedbackFile` | `false` | Path to JSONL feedback log for search result tracking |
 | `$wgAssistedSearchMinArticleLength` | `500` | Min page length in bytes to include in gist |
 | `$wgAssistedSearchGistMaxSize` | `80000` | Max total size in bytes for the articles section of the gist |
+| `$wgAssistedSearchNotice` | `"Queries are logged..."` | Notice displayed below the search form, or `false` to hide |
 
 ## Wiki Gist
 
