@@ -86,10 +86,11 @@ class SpecialAssistedSearch extends SpecialPage {
 		$queryValue = htmlspecialchars( $query );
 
 		return <<<HTML
-<form method="post" action="{$actionUrl}">
+<form method="post" action="{$actionUrl}" onsubmit="var b=document.getElementById('assistedsearch-submit');b.disabled=true;document.getElementById('assistedsearch-loading').style.display='block'">
 	<input type="text" name="query" value="{$queryValue}" placeholder="{$placeholder}" size="60" autofocus autocomplete="off" />
-	<input type="submit" value="{$buttonText}" />
+	<input type="submit" id="assistedsearch-submit" value="{$buttonText}" />
 </form>
+<div id="assistedsearch-loading" style="display:none;padding:8px 0">⏳</div>
 HTML;
 	}
 
