@@ -11,6 +11,12 @@ LLM-assisted wiki search using OpenRouter. Provides `Special:AssistedSearch`.
 - Optional wiki gist gives the LLM context about the wiki's structure
 - Search feedback loop tracks frequently accessed articles for better gist generation
 
+It is recommended to choose an LLM (provider) that provides good tool use and has low latency.
+
+As of May 2026, Laguna XS.2 and Qwen 3.5-36B-A3B are fine; the free Nemotron 3 versions show inconsistent tool use.
+
+![Assisted Search example](/AssistedSearch_example.jpg)
+
 ## Configuration
 
 | Variable | Default | Description |
