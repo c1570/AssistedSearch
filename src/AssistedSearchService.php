@@ -17,6 +17,10 @@ class AssistedSearchService {
 	private ?string $feedbackFile;
 	private const MAX_RETRIES = 3;
 	private const RETRY_DELAY_MS = 1000;
+	private const MAX_COMPLETION_TOKENS = 4096;
+	// Low temperature: this is a ranking/extraction task, not creative writing.
+	private const TEMPERATURE = 0.2;
+	private const SEARCH_DEADLINE_SECONDS = 35.0;
 
 	private const SYSTEM_PROMPT = "You are a wiki search assistant. Your job is to find the most relevant article sections for a user's query.";
 
@@ -169,6 +173,8 @@ PROMPT;
 
 		$systemPrompt .= self::TOOLS_INSTRUCTION;
 
+		$systemPrompt .= "\n\nYou have at most {$this->maxRounds} search rounds before you must call submit_results. Search broadly with your best keywords in round 1 rather than trickling in narrow queries across several rounds.";
+
 		$systemPrompt .= "\n\nDetect the language of the user's query and use that same language for all relevance_explanation values in submit_results. If the query language is ambiguous, fall back to the wiki's default language (\"$langCode\").";
 
 		$messages = [
@@ -178,6 +184,8 @@ PROMPT;
 
 		$state = 'searching';
 		$rounds = 0;
+		$startTime = microtime( true );
+		$deadline = $startTime + self::SEARCH_DEADLINE_SECONDS;
 
 		while ( true ) {
 			$rounds++;
@@ -190,7 +198,9 @@ PROMPT;
 			$result = $this->callLlm( $client, $messages, [
 				'tools' => self::TOOLS,
 				'tool_choice' => 'auto',
-			] );
+				'max_completion_tokens' => self::MAX_COMPLETION_TOKENS,
+				'temperature' => self::TEMPERATURE,
+			], $deadline );
 
 			$assistantMessage = [
 				'role' => 'assistant',
@@ -222,12 +232,15 @@ PROMPT;
 						'role' => 'system',
 						'content' => 'Your response was too long. Please give a shorter (tool calling only!) response.',
 					];
-					continue;
 				}
 			}
 
-			if ( $state === 'searching' && $rounds >= $this->maxRounds ) {
-				$this->logger->info( "AssistedSearch: Max rounds reached, transitioning to final state" );
+			$deadlineExceeded = microtime( true ) >= $deadline;
+
+			if ( $state === 'searching' && ( $rounds >= $this->maxRounds || $deadlineExceeded ) ) {
+				$this->logger->info( "AssistedSearch: {reason}, transitioning to final state", [
+					'reason' => $deadlineExceeded ? 'Time budget exceeded' : 'Max rounds reached',
+				] );
 				$messages[] = [
 					'role' => 'system',
 					'content' => 'The next message repeats the original query for your reference.',
@@ -244,8 +257,10 @@ PROMPT;
 				continue;
 			}
 
-			if ( $rounds >= 5 ) {
-				$this->logger->warning( "AssistedSearch: Max total rounds (5) reached, returning empty results" );
+			if ( $rounds >= 5 || $deadlineExceeded ) {
+				$this->logger->warning( "AssistedSearch: Aborting search ({reason})", [
+					'reason' => $deadlineExceeded ? 'time budget exceeded' : 'max total rounds (5) reached',
+				] );
 				$this->logConversation( $messages );
 				return [];
 			}
@@ -402,7 +417,7 @@ PROMPT;
 		}
 	}
 
-	private function callLlm( OpenRouterClient $client, array $messages, array $options ): array {
+	private function callLlm( OpenRouterClient $client, array $messages, array $options, float $deadline ): array {
 		$lastException = null;
 		for ( $attempt = 1; $attempt <= self::MAX_RETRIES; $attempt++ ) {
 			try {
@@ -414,7 +429,8 @@ PROMPT;
 					|| str_contains( $e->getMessage(), '429' )
 					|| str_contains( $e->getMessage(), 'timeout' )
 					|| str_contains( $e->getMessage(), 'Provider returned error' );
-				if ( !$retryable || $attempt === self::MAX_RETRIES ) {
+				$delaySeconds = ( self::RETRY_DELAY_MS * $attempt ) / 1000;
+				if ( !$retryable || $attempt === self::MAX_RETRIES || microtime( true ) + $delaySeconds >= $deadline ) {
 					break;
 				}
 				$this->logger->warning( "AssistedSearch: LLM call failed (attempt {attempt}/{max}), retrying: {error}", [
@@ -422,7 +438,7 @@ PROMPT;
 					'max' => self::MAX_RETRIES,
 					'error' => $e->getMessage(),
 				] );
-				usleep( self::RETRY_DELAY_MS * 1000 * $attempt );
+				usleep( (int)( $delaySeconds * 1000000 ) );
 			}
 		}
 		throw $lastException;
